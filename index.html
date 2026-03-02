@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ADI SST / Stats Simplified Tracker</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&display=swap" rel="stylesheet">
+
+<!-- ✅ jsPDF + AutoTable -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+body{
+    margin:0;
+    font-family:'Orbitron',sans-serif;
+    background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+    color:white;
+}
+
+.container{ padding:40px; }
+
+h1{
+    text-align:center;
+    letter-spacing:2px;
+}
+
+input{
+    padding:12px 14px;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.08);
+    color:white;
+    outline:none;
+    transition:.3s;
+    backdrop-filter:blur(8px);
+}
+
+input:focus{
+    border:1px solid #00e5ff;
+    box-shadow:0 0 10px #00e5ff;
+}
+
+button{
+    padding:10px 18px;
+    border:none;
+    border-radius:8px;
+    background:#00e5ff;
+    color:black;
+    font-weight:600;
+    cursor:pointer;
+    transition:.3s;
+    margin:5px 0;
+}
+
+button:hover{ background:#00bcd4; }
+
+.player-row{
+    display:flex;
+    gap:10px;
+    margin-bottom:8px;
+}
+
+#appPage{ display:none; }
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:20px;
+    font-size:13px;
+}
+
+th,td{
+    padding:6px;
+    border:1px solid rgba(255,255,255,.1);
+    text-align:center;
+}
+
+th{ background:rgba(0,0,0,.4); }
+
+tr:nth-child(even){ background:rgba(255,255,255,.05); }
+
+#commandInput{
+    width:280px;
+    font-size:16px;
+}
+
+#alertBox{
+    color:#ff5252;
+    height:20px;
+    margin-top:10px;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<div id="setupPage">
+<h1>ADI SST<br>Stats Simplified Tracker</h1>
+
+<h3>Match Details</h3>
+<input id="teamNameInput" placeholder="Your Team Name"><br><br>
+<input id="opponentInput" placeholder="Opponent Name"><br><br>
+<input id="dateInput" type="date"><br><br>
+<input id="timeInput" type="time"><br><br>
+<input id="arenaInput" placeholder="Arena"><br><br>
+
+<h3>Players</h3>
+<div id="playersSetup"></div>
+
+<button onclick="addPlayerRow()">Add Player</button>
+<button onclick="startApp()">Start Game</button>
+</div>
+
+<div id="appPage">
+<h1 id="teamTitle"></h1>
+<button onclick="goBack()">Back</button>
+<button onclick="downloadPDF()">Download PDF</button>
+
+<table id="statsTable">
+<thead>
+<tr>
+<th>Name</th><th>#</th>
+<th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>FOULS</th><th>TO</th>
+<th>FG</th><th>FG%</th>
+<th>FT</th><th>FT%</th>
+<th>2PT</th><th>2PT%</th>
+<th>3PT</th><th>3PT%</th>
+<th>EFF</th>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+<tfoot id="teamTotals"></tfoot>
+</table>
+
+<br>
+<input type="text" id="commandInput" placeholder="Enter command..." autofocus>
+<button onclick="undoLast()">Undo</button>
+
+<div id="alertBox"></div>
+</div>
+</div>
+
+<script>
+let players={},eventHistory=[];
+let teamName="",opponent="",matchDate="",matchTime="",arena="";
+
+function addPlayerRow(name="",number=""){
+const div=document.createElement("div");
+div.className="player-row";
+div.innerHTML=`<input placeholder="Player Name" value="${name}">
+<input type="number" placeholder="#" min="0" max="99" value="${number}">`;
+document.getElementById("playersSetup").appendChild(div);
+}
+addPlayerRow();
+
+function startApp(){
+teamName=document.getElementById("teamNameInput").value||"Team";
+opponent=document.getElementById("opponentInput").value||"-";
+matchDate=document.getElementById("dateInput").value||"-";
+matchTime=document.getElementById("timeInput").value||"-";
+arena=document.getElementById("arenaInput").value||"-";
+
+players={};eventHistory=[];
+
+document.querySelectorAll(".player-row").forEach(row=>{
+const inputs=row.querySelectorAll("input");
+const name=inputs[0].value;
+const number=parseInt(inputs[1].value);
+if(name && number>=0 && number<=99)
+players[number]=createPlayer(number,name);
+});
+
+if(Object.keys(players).length===0){
+showAlert("Insert valid players");return;
+}
+
+document.getElementById("teamTitle").innerText=
+`${teamName} vs ${opponent}`;
+
+document.getElementById("setupPage").style.display="none";
+document.getElementById("appPage").style.display="block";
+renderTable();
+}
+
+function goBack(){
+document.getElementById("setupPage").style.display="block";
+document.getElementById("appPage").style.display="none";
+}
+
+function createPlayer(n,name){
+return{
+number:n,name,
+pts:0,reb:0,ast:0,stl:0,blk:0,fouls:0,to:0,
+fgMade:0,fgAtt:0,
+ftMade:0,ftAtt:0,
+twoMade:0,twoAtt:0,
+threeMade:0,threeAtt:0
+};
+}
+
+function pct(m,a){return a?((m/a)*100).toFixed(1)+"%":"0%";}
+
+function renderTable(){
+let body=document.getElementById("tableBody");
+body.innerHTML="";
+let totals=createPlayer(0,"TOTAL");
+
+Object.values(players).forEach(p=>{
+let eff=p.pts+p.reb+p.ast+p.stl+p.blk-
+(p.fgAtt-p.fgMade)-(p.ftAtt-p.ftMade)-p.to;
+
+Object.keys(totals).forEach(k=>{
+if(typeof p[k]==="number")totals[k]+=p[k];
+});
+
+body.innerHTML+=`
+<tr>
+<td>${p.name}</td><td>${p.number}</td>
+<td>${p.pts}</td><td>${p.reb}</td><td>${p.ast}</td>
+<td>${p.stl}</td><td>${p.blk}</td><td>${p.fouls}</td><td>${p.to}</td>
+<td>${p.fgMade}/${p.fgAtt}</td><td>${pct(p.fgMade,p.fgAtt)}</td>
+<td>${p.ftMade}/${p.ftAtt}</td><td>${pct(p.ftMade,p.ftAtt)}</td>
+<td>${p.twoMade}/${p.twoAtt}</td><td>${pct(p.twoMade,p.twoAtt)}</td>
+<td>${p.threeMade}/${p.threeAtt}</td><td>${pct(p.threeMade,p.threeAtt)}</td>
+<td>${eff}</td>
+</tr>`;
+});
+
+document.getElementById("teamTotals").innerHTML="";
+}
+
+/* ✅ FIXED PDF FUNCTION */
+async function downloadPDF(){
+const { jsPDF } = window.jspdf;
+const doc = new jsPDF("landscape");
+
+doc.setFontSize(16);
+doc.text(`${teamName} vs ${opponent}`, 14, 15);
+
+doc.setFontSize(10);
+doc.text(`Date: ${matchDate}    Time: ${matchTime}    Arena: ${arena}`, 14, 22);
+
+doc.autoTable({
+html: '#statsTable',
+startY: 28,
+styles: { fontSize: 7 },
+headStyles: { fillColor: [0, 229, 255] }
+});
+
+doc.save(`${teamName}_vs_${opponent}.pdf`);
+}
+
+/* ===== Command Engine remains same ===== */
+document.getElementById("commandInput")
+.addEventListener("keypress",e=>{
+if(e.key==="Enter"){
+handleCommand(e.target.value.trim());
+e.target.value="";
+}
+});
+
+function showAlert(msg){
+let box=document.getElementById("alertBox");
+box.textContent=msg;
+setTimeout(()=>box.textContent="",1500);
+}
+
+function handleCommand(i){
+if(!i)return;
+let miss=i.match(/^(\d{1,2})([123])x$/);
+let made=i.match(/^(\d{1,2})([123])$/);
+let stat=i.match(/^(\d{1,2})([frabst])$/);
+
+if(miss)processShot(+miss[1],miss[2],false);
+else if(made)processShot(+made[1],made[2],true);
+else if(stat)processStat(+stat[1],stat[2]);
+else showAlert("Invalid Command");
+}
+
+function processShot(n,t,m){
+if(!players[n]){showAlert("Invalid Player");return;}
+let p=players[n];
+let e={p:n,c:"shot",t,m};
+
+if(t=="1"){p.ftAtt++;if(m){p.ftMade++;p.pts+=1;}}
+if(t=="2"){p.fgAtt++;p.twoAtt++;if(m){p.fgMade++;p.twoMade++;p.pts+=2;}}
+if(t=="3"){p.fgAtt++;p.threeAtt++;if(m){p.fgMade++;p.threeMade++;p.pts+=3;}}
+
+eventHistory.push(e);renderTable();
+}
+
+function processStat(n,t){
+if(!players[n]){showAlert("Invalid Player");return;}
+let p=players[n];
+let e={p:n,c:"stat",t};
+if(t=="f")p.fouls++;
+if(t=="r")p.reb++;
+if(t=="a")p.ast++;
+if(t=="b")p.blk++;
+if(t=="s")p.stl++;
+if(t=="t")p.to++;
+eventHistory.push(e);renderTable();
+}
+
+function undoLast(){
+if(!eventHistory.length){showAlert("Nothing to undo");return;}
+let e=eventHistory.pop();
+let p=players[e.p];
+if(e.c=="shot"){
+if(e.t=="1"){p.ftAtt--;if(e.m){p.ftMade--;p.pts--;}}
+if(e.t=="2"){p.fgAtt--;p.twoAtt--;if(e.m){p.fgMade--;p.twoMade--;p.pts-=2;}}
+if(e.t=="3"){p.fgAtt--;p.threeAtt--;if(e.m){p.fgMade--;p.threeMade--;p.pts-=3;}}
+}
+if(e.c=="stat"){
+if(e.t=="f")p.fouls--;
+if(e.t=="r")p.reb--;
+if(e.t=="a")p.ast--;
+if(e.t=="b")p.blk--;
+if(e.t=="s")p.stl--;
+if(e.t=="t")p.to--;
+}
+renderTable();
+}
+</script>
+</body>
+</html>
